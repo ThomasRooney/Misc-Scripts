@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html>
+  <head>
+  <meta charset="utf-8">
+    <script>
+
+      var height = 18;
+
+      var data = {
+        type: 'directory',
+        name: '',
+        sourceLength: 0,
+        children: {}
+      }
+
+      var chart, info;
+      var sumSourceLength = 0;
+
+
+      function handleColor(e) {
+        document.body.className = 'color-' + e.target.value;
+      }
+
+      function handleHighlight(e) {
+        var value = typeof e === 'string' ? e : e.target.value;
+
+        var nodes = document.querySelectorAll('[data-name]')
+        nodes.forEach(node => {
+          node.removeAttribute('highlighted')
+        });
+
+        var highlightedNodes = document.querySelectorAll('[data-name="' + value + '"]');
+        highlightedNodes.forEach(node => {
+          node.setAttribute('highlighted', '')
+        })
+      }
+
+
+      function handleFileSelect(evt) {
+
+        var files = this.files; /* now you can work with the file list */
+        for (var i = 0, f; f = files[i]; i++) {
+          var reader = new FileReader();
+          reader.onload = (function(theFile) {
+            return function(e) {
+              var result = JSON.parse(e.target.result)
+              formatResult(result)
+            };
+          })(f);
+          reader.readAsText(f);
+        }
+      }
+
+
+
+      function formatResult(result) {
+
+
+        // Create Tree from flat list
+        result.forEach(module => {
+          if (module.request) {
+            var splitRequest = module.request.split('/');
+
+            var parentDataDirRef = data;
+            splitRequest.forEach((directoryOrFile, index) => {
+
+              if (splitRequest[index + 1]) {
+                if (!parentDataDirRef.children[directoryOrFile]) {
+                  parentDataDirRef.children[directoryOrFile] = {
+                    name: directoryOrFile,
+                    type: 'directory',
+                    sourceLength: 0,
+                    numFiles: 0,
+                    children: {}
+                  }
+                }
+              } else {
+                if (!parentDataDirRef.children[directoryOrFile]) {
+                  parentDataDirRef.children[directoryOrFile] = {
+                    type: 'file',
+                    name: directoryOrFile,
+                    sourceLength: module.sourceLength,
+                    rawRequest: module.rawRequest
+                  }
+
+                  // Sum sourceLength totals
+                  var sumPointer = data;
+                  splitRequest.forEach(directory => {
+                    if (sumPointer.children[directory].type === 'directory' && module.sourceLength) {
+                        sumPointer.children[directory].sourceLength += module.sourceLength;
+
+                        // TODO: This is off
+                        sumPointer.children[directory].numFiles += 1;
+                    }
+                    sumPointer = sumPointer.children[directory];
+                  })
+                }
+              }
+              parentDataDirRef = parentDataDirRef.children[directoryOrFile]
+            })
+
+          }
+        })
+
+
+       sumSourceLength = data.children[""].sourceLength;
+
+       console.log(data)
+
+        drawDirectory(data.children[""], data.children[""].sourceLength, chart, 0);
+
+      }
+
+
+      var percentColors = [
+          { pct: 0.0, color: { r: 0xd9, g: 0xef, b: 0x8b } },
+          { pct: 0.05, color: { r: 0xfe, g: 0xe0, b: 0x8b } },
+          { pct: 1.0, color: { r: 0xf4, g: 0x6d, b: 0x43 } }
+      ];
+
+      function getColor(pct) {
+        pct = pct / 100;
+        for (var i = 1; i < percentColors.length - 1; i++) {
+            if (pct < percentColors[i].pct) {
+                break;
+            }
+        }
+        var lower = percentColors[i - 1];
+        var upper = percentColors[i];
+        var range = upper.pct - lower.pct;
+        var rangePct = (pct - lower.pct) / range;
+        var pctLower = 1 - rangePct;
+        var pctUpper = rangePct;
+        var color = {
+            r: Math.floor(lower.color.r * pctLower + upper.color.r * pctUpper),
+            g: Math.floor(lower.color.g * pctLower + upper.color.g * pctUpper),
+            b: Math.floor(lower.color.b * pctLower + upper.color.b * pctUpper)
+        };
+        return 'rgb(' + [color.r, color.g, color.b].join(',') + ')';
+      }
+
+
+      function drawItem(item, parentSourceLength, parentSvg, childXPercent) {
+        var percentOfParent = (item.sourceLength / parentSourceLength) * 100;
+        var percentOfTotal = (item.sourceLength / sumSourceLength) * 100;
+
+
+        var id = new Date().valueOf() + Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
+
+        function setDataAttributes(node) {
+          node.setAttribute('data-name', item.name);
+          node.setAttribute('data-percent-total', percentOfTotal);
+          node.setAttribute('data-percent-parent', percentOfParent);
+
+          var splitName = item.name.split('.');
+          var extension = splitName[splitName.length - 1];
+          node.setAttribute('type', extension);
+        }
+
+        function getRect() {
+          var rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          rect.setAttribute('x', 0)
+          rect.setAttribute('y', 0)
+          rect.setAttribute('width', '100%')
+          rect.setAttribute('height', height + 'px')
+          rect.setAttribute('class', 'item')
+          return rect;
+        }
+
+        // Outer SVG
+        var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute('width', percentOfParent + '%')
+        svg.setAttribute('y', height + 'px');
+        svg.setAttribute('x', childXPercent + '%');
+        //group.onclick = handleHighlight.bind(this, directory.name)
+
+        // Clip Path
+        var clip = document.createElementNS("http://www.w3.org/2000/svg", "clipPath");
+        clip.setAttribute('id', id)
+        clip.appendChild(getRect())
+        svg.appendChild(clip)
+
+        // Background
+        var background = getRect();
+        setDataAttributes(background);
+        svg.appendChild(background);
+
+
+        // Clipped Area
+        var group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        group.setAttribute('clip-path', `url(#${id})`)
+        svg.appendChild(group)
+
+        var text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute('x', 5)
+        text.setAttribute('y', (height / 2) + 1 + 'px')
+        text.setAttribute('width', '100%')
+        text.setAttribute('alignment-baseline', 'middle')
+        text.setAttribute('text-anchor', 'left')
+        text.setAttribute('width', '100%')
+        text.setAttribute('height', height + 'px')
+        text.innerHTML = item.name;
+        setDataAttributes(text);
+        group.appendChild(text)
+
+        parentSvg.appendChild(svg);
+      }
+
+      function drawDirectory(directory, parentSourceLength, parentSvg, childXPercent) {
+        var percentOfParent = (directory.sourceLength / parentSourceLength) * 100;
+        var percentOfTotal = (directory.sourceLength / sumSourceLength) * 100;
+
+        if (percentOfTotal < 100) {
+
+          var id = new Date().valueOf() + Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
+
+          function setDataAttributes(node) {
+            node.setAttribute('data-name', directory.name);
+            node.setAttribute('data-percent-total', percentOfTotal);
+            node.setAttribute('data-percent-parent', percentOfParent);
+            node.setAttribute('data-num-files', directory.numFiles);
+          }
+
+          function getRect() {
+            var rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            rect.setAttribute('x', 0)
+            rect.setAttribute('y', 0)
+            rect.setAttribute('width', '100%')
+            rect.setAttribute('height', height + 'px')
+            rect.setAttribute('class', 'directory')
+            rect.setAttribute('fill', getColor(percentOfTotal))
+            return rect;
+          }
+
+          // Outer SVG
+          var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          svg.setAttribute('width', percentOfParent + '%')
+          svg.setAttribute('y', height + 'px');
+          svg.setAttribute('x', childXPercent + '%');
+          //group.onclick = handleHighlight.bind(this, directory.name)
+
+          // Clip Path
+          var clip = document.createElementNS("http://www.w3.org/2000/svg", "clipPath");
+          clip.setAttribute('id', id)
+          clip.appendChild(getRect())
+          svg.appendChild(clip)
+
+          // Background
+          var background = getRect();
+          setDataAttributes(background);
+          svg.appendChild(background);
+
+          // Clipped Area
+          var group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+          group.setAttribute('clip-path', `url(#${id})`)
+          svg.appendChild(group)
+
+          var text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          text.setAttribute('x', 5)
+          text.setAttribute('y', (height / 2) + 1 + 'px')
+          text.setAttribute('width', '100%')
+          text.setAttribute('alignment-baseline', 'middle')
+          text.setAttribute('text-anchor', 'left')
+          text.setAttribute('width', '100%')
+          text.setAttribute('height', height + 'px')
+          text.innerHTML = directory.name;
+          setDataAttributes(text);
+          group.appendChild(text)
+
+          parentSvg.appendChild(svg);
+        } else {
+          var svg = parentSvg
+        }
+
+        if (directory.children) {
+          var childXPercent = 0;
+          Object.keys(directory.children).forEach(itemOrDirectoryKey => {
+            var itemOrDirectory = directory.children[itemOrDirectoryKey];
+
+            if (itemOrDirectory.type === 'directory') {
+              drawDirectory(itemOrDirectory, directory.sourceLength, svg, childXPercent)
+            } else {
+              drawItem(itemOrDirectory, directory.sourceLength, svg, childXPercent)
+            }
+            childXPercent += ((itemOrDirectory.sourceLength / directory.sourceLength) * 100);
+          })
+        }
+      }
+
+
+      function onMouseMove(e) {
+        var e = e || window.event;
+        var dataset = e.target.dataset;
+        if (dataset && dataset.name) {
+          info.innerHTML = `<div>Name: ${dataset.name}</div>
+            <div>Percent of Total: ${dataset.percentTotal}</div>
+            <div>Percent of Parent: ${dataset.percentParent}</div>
+            <div>Number of Files: ${dataset.numFiles}</div>`
+        } else {
+          info.innerHTML = '';
+        }
+      }
+
+
+
+
+    </script>
+
+    <style type="text/css">
+
+    body {
+      font-family: sans-serif;
+      font-size: 16px;
+    }
+
+      #chart {
+        display: block;
+        width: 100%;
+        height: 300px;
+      }
+
+      #chart text {
+        font-family: sans-serif;
+        font-size: 12px;
+        color: #eee;
+        cursor: pointer;
+        user-select: none;
+      }
+
+      svg svg {
+        overflow: visible;
+      }
+
+      body:not(.color-type) svg rect {
+        stroke: #5f5f5f;
+        stroke-width: 1px;
+        stroke-alignment: inner;
+      }
+
+      body:not(.color-type) .item {
+        fill: #d7dde0;
+      }
+
+
+      body.color-type svg rect {
+        fill: #eee;
+        stroke: #ccc;
+        stroke-width: 1px;
+        stroke-alignment: inner;
+      }
+
+      body.color-type .item[type] {
+        fill: #d7dde0;
+      }
+
+      body.color-type .item[type="js"] {
+        fill: rgb(227, 234, 139);
+        stroke: rgb(183, 193, 56);
+      }
+
+      body.color-type .item[type="css"],
+      body.color-type .item[type="less"] {
+        fill: rgb(253, 213, 132);
+        stroke: rgb(212, 135, 38);
+      }
+
+      body.color-type .item[type="woff"],
+      body.color-type .item[type="gif"],
+      body.color-type .item[type="jpg"] {
+        fill: rgb(244, 111, 68);
+        stroke: rgb(198, 57, 14);
+      }
+
+      rect[highlighted] {
+        fill: #d6adfd !important;
+        stroke: #8860af !important;
+      }
+
+      svg:hover > rect {
+        fill: rgb(158, 202, 225);
+      }
+
+    </style>
+
+
+  </head>
+  <body>
+    <input type="file" id="files" name="files[]" multiple />
+
+    <label for="highlight">highlight:</label>
+    <input type="text" id="highlight" />
+
+    <label for="color">color:</label>
+    <select id="color">
+      <option value="weight">Weight</option>
+      <option value="type">Type</option>
+    </select>
+
+
+    <svg version="1.1" xmlns="http://www.w3.org/2000/svg" id="chart" width="100%"></svg>
+    <div id="info"></div>
+
+    <script>
+      document.getElementById('files').addEventListener('change', handleFileSelect, false);
+      document.getElementById('highlight').addEventListener('input', handleHighlight);
+      document.getElementById('color').addEventListener('input', handleColor);
+      document.body.addEventListener('mousemove', onMouseMove)
+      info = document.getElementById("info");
+      chart = document.getElementById("chart");
+    </script>
+
+  </body>
+</html>
